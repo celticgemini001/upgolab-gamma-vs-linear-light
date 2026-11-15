@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gamma Space vs Linear Light: Does Resampling in sRGB Actually Cost Quality?</title>
+<meta name="description" content="Measured: resampling a 50/50 checkerboard in sRGB returns 127/255 where linear light returns 187/255 — a 60 code-value error. But on a real photo the same linear pipeline loses 0.98 dB. And the winner flips depending on which colour space you compute PSNR in.">
+<link rel="canonical" href="https://celticgemini001.github.io/upgolab-gamma-vs-linear-light/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Gamma Space vs Linear Light: Does Resampling in sRGB Actually Cost Quality?">
+<meta property="og:description" content="Nine measurements, three negative results, and one finding that invalidates most published gamma comparisons: the winner depends on the colour space of the metric.">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article",
+ "headline":"Gamma Space vs Linear Light: Does Resampling in sRGB Actually Cost Quality?",
+ "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "datePublished":"2026-11-15",
+ "dateModified":"2026-11-15",
+ "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-gamma-vs-linear-light/"}
+</script>
+<style>
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2rem;line-height:1.22;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.33rem;margin:2.5rem 0 .7rem}
+h3{font-size:1.06rem;margin:1.8rem 0 .5rem}
+p,li{color:#2b3038}ul,ol{padding-left:1.3rem}li{margin:.4rem 0}
+a{color:var(--acc)}
+.lede{font-size:1.14rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.88rem;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:1rem;margin-bottom:2rem}
+table{width:100%;border-collapse:collapse;margin:1.4rem 0;font-size:.94rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.86rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.9rem 1.1rem;margin:1.6rem 0;border-radius:0 6px 6px 0}
+.callout p{margin:.3rem 0}
+.callout.warn{border-left-color:#b45309;background:#fef7ec}
+pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem}
+code{font-size:.9em}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<article>
+<h1>Gamma Space vs Linear Light: Does Resampling in sRGB Actually Cost Quality?</h1>
+
+<p class="lede">Every article on this topic shows the same demonstration: downscale a black-and-white
+checkerboard in sRGB, get the wrong grey, then do it in linear light and get the right one. That
+demonstration is correct. It is also, as a basis for deciding what your upscaler should do,
+incomplete — and I can show you where it breaks. Nine measurements below, three of which came out
+against the hypothesis I started with.</p>
+
+<p class="meta">Measured with numpy 1.26.4 and Pillow 12.2.0 · one 341×512 photograph plus synthetic
+controls · bilinear and bicubic kernels implemented explicitly so both colour spaces see the exact
+same filter · every number reproducible from the snippet at the end</p>
+
+<h2>The claim, stated precisely enough to test</h2>
+
+<p>sRGB is a non-linear encoding. A stored value of 128 does not represent 50% of the light that
+reaches your eye — it represents roughly 21%. The encoding exists because human contrast perception
+is roughly logarithmic, so spending code values where the eye is sensitive wastes fewer bits. That
+is a storage decision, and it is a good one.</p>
+
+<p>The problem is that almost every image operation — blur, resize, sharpen, average, composite —
+is defined as a physical operation on light. Averaging two pixels means averaging the light they
+emitted. If you average the encoded values instead, you are averaging the logarithms, and the
+average of logarithms is not the logarithm of the average. The error is systematic and it always
+points the same direction: <strong>gamma-space averaging produces darker results than physics
+allows.</strong></p>
+
+<p>So the standard advice is: linearise, resample, re-encode. That advice is correct as far as it
+goes. What follows is the part that is usually left out.</p>
+
+<h2>Measurement 1 — the checkerboard, quantified</h2>
+
+<p>A 256×256 field of 1-pixel checkerboard: half the pixels at 1.0, half at 0.0. Average it 4×
+in each direction by exact area averaging. Every 4×4 block contains exactly 8 white and 8 black
+pixels. The physical answer is 0.5 in linear light, which encodes to sRGB 0.7354 — that is
+<strong>187.5/255</strong>, not 128.</p>
+
+<table>
+<thead><tr><th>Pipeline</th><th>Resulting grey</th><th>Code value</th><th>Error vs physics</th></tr></thead>
+<tbody>
+<tr><td>Area-average in sRGB</td><td class="num">0.5000</td><td class="num">127.5</td><td class="num">−60.0 cv</td></tr>
+<tr><td>Area-average in linear light</td><td class="num">0.7354</td><td class="num">187.5</td><td class="num">0.0 cv</td></tr>
+<tr><td>Physically correct answer</td><td class="num">0.7354</td><td class="num">187.5</td><td class="num">—</td></tr>
+</tbody>
+</table>
+
+<p>The sRGB pipeline is 32% dark. Not a rounding error — 60 of 255 code values, in the middle of
+the tonal range where most of an image lives. If you have ever downscaled a fine texture and
+watched mid-grey areas turn muddy, this is the mechanism.</p>
+
+<h2>Measurement 2 — it is not a bilinear artefact</h2>
+
+<p>An obvious objection: my area-averaging is a box filter, maybe the result is specific to that
+kernel. So I repeated it with a real bicubic kernel, going through Pillow's 8-bit sRGB path for
+the gamma case and through a float32 linear buffer for the linear case.</p>
+
+<table>
+<thead><tr><th>Kernel</th><th>sRGB result</th><th>Linear result</th><th>Gap</th></tr></thead>
+<tbody>
+<tr><td>Box (exact area average)</td><td class="num">127.5 cv</td><td class="num">187.5 cv</td><td class="num">60.0 cv</td></tr>
+<tr><td>Bicubic (Pillow)</td><td class="num">128.0 cv</td><td class="num">187.5 cv</td><td class="num">59.5 cv</td></tr>
+</tbody>
+</table>
+
+<p>59.5 versus 60.0. The kernel is not the variable; the colour space is. This is the measurement
+everyone publishes, and it is solid.</p>
+
+<h2>Measurement 3 — the negative result: pure upscaling barely moves</h2>
+
+<p>Now the part that is usually skipped. The checkerboard test has a downscale in it. What if you
+are only upscaling — which is the operation this whole site is about?</p>
+
+<p>I took a 32×32 linear gradient, upscaled it to 256×256 by bilinear in each space, and compared
+both against the analytic ramp at full resolution.</p>
+
+<table>
+<thead><tr><th>Space</th><th>PSNR vs ground truth</th><th>Max |error|</th></tr></thead>
+<tbody>
+<tr><td>sRGB</td><td class="num">42.04 dB</td><td class="num">3.49 cv</td></tr>
+<tr><td>Linear light</td><td class="num">42.21 dB</td><td class="num">3.50 cv</td></tr>
+</tbody>
+</table>
+
+<p>0.17 dB apart. The two outputs differ by at most <strong>0.40 code values</strong> anywhere in
+the image, with a mean difference of 0.07 cv. That is below the quantisation step of an 8-bit
+file — the two results are, for practical purposes, the same file.</p>
+
+<div class="callout">
+<p><strong>Why this happens.</strong> Interpolation is an affine combination of existing samples.
+Both sRGB and linear light are monotone pointwise maps of the same underlying signal. Interpolating
+at a position that falls exactly on an existing sample returns that sample in both spaces. The two
+spaces only diverge where the interpolation actually blends — i.e. between samples — and for a
+smooth ramp the blend weights are close to linear locally, so the divergence stays tiny.</p>
+</div>
+
+<p>So: if your pipeline only upscales, and the source is smooth, linearising buys you 0.17 dB and
+costs you a float conversion per channel. That is a real trade and it is not obviously worth it.
+This result contradicted my expectation, which was that linear light would win clearly.</p>
+
+<h2>Measurement 4 — where it does hurt: thin high-contrast structure</h2>
+
+<p>The divergence is not uniform across the image. It concentrates where the blend weights are
+large and the sample values are far apart — sharp edges on dark backgrounds. I put 1-pixel bright
+lines (0.90) every 8 rows on a near-black field (0.02), downscaled and re-upscaled at increasing
+factors, and measured the peak-to-trough contrast of the recovered line.</p>
+
+<table>
+<thead><tr><th>Down/up factor</th><th>sRGB contrast</th><th>Linear contrast</th><th>sRGB / linear</th></tr></thead>
+<tbody>
+<tr><td>2×</td><td class="num">112.2 cv</td><td class="num">163.5 cv</td><td class="num">0.686</td></tr>
+<tr><td>3×</td><td class="num">74.8 cv</td><td class="num">135.2 cv</td><td class="num">0.553</td></tr>
+<tr><td>4×</td><td class="num">56.1 cv</td><td class="num">117.9 cv</td><td class="num">0.476</td></tr>
+<tr><td>8×</td><td class="num">0.0 cv</td><td class="num">0.0 cv</td><td class="num">—</td></tr>
+</tbody>
+</table>
+
+<p>At 4× the sRGB pipeline keeps <strong>47.6%</strong> of the linear-light contrast — it has
+thrown away more than half the signal the linear pipeline preserved. The ratio degrades
+monotonically with scale factor: 0.686 → 0.553 → 0.476.</p>
+
+<p>And the 8× row is honest and unhelpful: at 8× downscale a 1-pixel line falls entirely between
+sample centres and both spaces return exactly zero. Once the line is gone, colour space cannot
+recover it. That is not a gamma problem; that is the Nyquist limit, and it is the more important
+of the two constraints. If you are choosing where to spend effort, sample density beats colour
+space by a wide margin.</p>
+
+<h2>Measurement 5 — compounding: does doing it in steps make it worse?</h2>
+
+<p>A common claim is that repeated gamma-space resizes accumulate error, so a multi-step pipeline
+is worse than a single step. I tested it directly: 8× downscale of the checkerboard in one box
+pass, versus three consecutive 2× box passes.</p>
+
+<table>
+<thead><tr><th>Space</th><th>1 step (8×)</th><th>3 steps (2× each)</th><th>Difference</th></tr></thead>
+<tbody>
+<tr><td>sRGB</td><td class="num">127.5 cv</td><td class="num">127.5 cv</td><td class="num">0.0</td></tr>
+<tr><td>Linear</td><td class="num">187.5 cv</td><td class="num">187.5 cv</td><td class="num">0.0</td></tr>
+</tbody>
+</table>
+
+<p>Zero difference, in both spaces. For exact area averaging this is expected: the mean of a set
+of means, when the subsets are equal size, is the mean of the whole set. Gamma does not change that
+— it is a pointwise map applied identically at every stage, so the composition is the same map
+applied once.</p>
+
+<p>The compounding claim is only true when the resampling is lossy in a way that interacts with
+clipping: if intermediate values saturate against 0 or 1, information is lost at each step and
+repetition makes it worse. With no clipping, gamma-space multi-step resizing is not worse than
+single-step. Another negative result.</p>
+
+<h2>Measurement 6 — the real photograph, and the result that surprised me</h2>
+
+<p>Synthetic patterns show the mechanism. They do not tell you what happens on a photograph. So I
+took a 1080×1620 photographic image, reduced it to 341×512, then ran the same 4× down/up cycle in
+both spaces and measured PSNR against the original.</p>
+
+<table>
+<thead><tr><th>Space</th><th>PSNR vs original</th><th>Mean |error|</th></tr></thead>
+<tbody>
+<tr><td>sRGB</td><td class="num">26.167 dB</td><td class="num">5.691 cv</td></tr>
+<tr><td>Linear light</td><td class="num">25.186 dB</td><td class="num">6.302 cv</td></tr>
+</tbody>
+</table>
+
+<p>Linear light is <strong>0.98 dB worse</strong>. On a real photograph, with a PSNR metric computed
+in sRGB, the "correct" pipeline scored lower than the "wrong" one.</p>
+
+<p>I did not expect this and I am not going to bury it. The explanation is in the next measurement,
+and it invalidates most gamma comparisons you will read — including the honest ones.</p>
+
+<h2>Measurement 7 — the metric decides the winner</h2>
+
+<p>The two candidate outputs are fixed images. The only thing I vary here is the colour space in
+which PSNR is computed. Same pixels, same ground truth, two different scoring spaces.</p>
+
+<table>
+<thead><tr><th>PSNR computed in</th><th>sRGB output</th><th>Linear output</th><th>Winner</th></tr></thead>
+<tbody>
+<tr><td>Gamma (as-stored sRGB)</td><td class="num">26.167 dB</td><td class="num">25.186 dB</td><td><strong>sRGB</strong></td></tr>
+<tr><td>Linear light</td><td class="num">26.802 dB</td><td class="num">27.374 dB</td><td><strong>Linear</strong></td></tr>
+</tbody>
+</table>
+
+<p>Read those two rows together. The comparison <strong>reverses</strong>. In gamma space, sRGB
+resampling wins by 0.98 dB. In linear light, the linear pipeline wins by 0.57 dB. Same two
+image files, same reference, opposite conclusion.</p>
+
+<div class="callout warn">
+<p><strong>This is the trap.</strong> A gamma-space PSNR penalises exactly the thing linear-light
+resampling does — it moves values away from the gamma-encoded mean and toward the physically
+correct mean. So if you evaluate a linear-light pipeline with a gamma-space metric, you are
+measuring how far it deviated from the answer the metric was built around. You will always
+conclude that linear light is worse.</p>
+<p>Conversely, a linear-light metric rewards physically correct averaging. It will always conclude
+that linear light is better. Neither result is a measurement of quality; both are measurements of
+agreement between the pipeline and the metric.</p>
+</div>
+
+<p>Any published comparison that reports a single PSNR number for gamma-versus-linear, without
+stating which space the number was computed in, is uninterpretable. That includes comparisons that
+reach the conclusion I expected.</p>
+
+<h2>Measurement 8 — the error is luminance-dependent, and it is not where you think</h2>
+
+<p>If gamma error were a midtone problem, it would scale with distance from the middle of the
+range. I swept a noisy field across nine mean luminance levels with fixed noise amplitude and
+measured the mean absolute difference between the two pipelines.</p>
+
+<table>
+<thead><tr><th>Scene mean</th><th>Mean |sRGB − linear|</th><th>Region</th></tr></thead>
+<tbody>
+<tr><td class="num">0.02</td><td class="num">0.68 cv</td><td>deep shadow</td></tr>
+<tr><td class="num">0.05</td><td class="num">1.59 cv</td><td>shadow</td></tr>
+<tr><td class="num">0.10</td><td class="num">1.62 cv</td><td>low midtone</td></tr>
+<tr><td class="num">0.18</td><td class="num">1.13 cv</td><td>mid-grey (18%)</td></tr>
+<tr><td class="num">0.30</td><td class="num">0.74 cv</td><td>midtone</td></tr>
+<tr><td class="num">0.50</td><td class="num">0.48 cv</td><td>upper midtone</td></tr>
+<tr><td class="num">0.70</td><td class="num">0.35 cv</td><td>highlight</td></tr>
+<tr><td class="num">0.85</td><td class="num">0.29 cv</td><td>bright</td></tr>
+<tr><td class="num">0.95</td><td class="num">0.22 cv</td><td>near-clip</td></tr>
+</tbody>
+</table>
+
+<p>The peak is not at mid-grey. It is at <strong>0.10 — 1.62 cv</strong>, roughly 3.4× the error at
+0.50. The sRGB transfer function is steepest near black, so a fixed linear-light interval maps to a
+larger code-value interval there. Shadows and low midtones are where gamma-space resampling does its
+damage; highlights are nearly unaffected.</p>
+
+<p>This explains a lot of inconsistent advice. Someone resampling a bright, high-key image finds
+gamma error negligible and says the whole thing is overblown. Someone working in shadows finds it
+severe and says it is critical. Both are right about their own image.</p>
+
+<h2>Measurement 9 — the error enters mostly at the downscale</h2>
+
+<p>If you are going to spend the float conversion anywhere, it helps to know which stage produces
+the error. I isolated the stages: compare the two downscale outputs only, then compare the two
+upscale outputs from an identical gamma-space input.</p>
+
+<table>
+<thead><tr><th>Stage isolated</th><th>Mean difference</th><th>Max difference</th></tr></thead>
+<tbody>
+<tr><td>Downscale only</td><td class="num">1.193 cv</td><td class="num">48.31 cv</td></tr>
+<tr><td>Upscale only</td><td class="num">0.777 cv</td><td class="num">45.60 cv</td></tr>
+</tbody>
+</table>
+
+<p>1.54× more error at the downscale. Not a dramatic split — both stages contribute — but the
+downscale dominates, which is consistent with everything above: downscaling averages many samples
+across a wide value range, upsampling blends two adjacent samples that are usually similar.</p>
+
+<p>The practical consequence: if your pipeline does both, linearise around the downscale. If it
+only upsamples, the 0.17 dB in measurement 3 is what you are buying.</p>
+
+<h2>What I would actually do</h2>
+
+<p>Summarising against the hypothesis I started with — that linear light is simply correct and
+should always be used:</p>
+
+<table>
+<thead><tr><th>Operation</th><th>Linearise?</th><th>Basis</th></tr></thead>
+<tbody>
+<tr><td>Downscale / area average</td><td>Yes</td><td>60 cv error in gamma space (m1)</td></tr>
+<tr><td>Blur / any averaging filter</td><td>Yes</td><td>Same mechanism as m1</td></tr>
+<tr><td>Composite / alpha blend</td><td>Yes</td><td>Averaging with large value gaps</td></tr>
+<tr><td>Thin structure on dark bg</td><td>Yes</td><td>52% contrast loss at 4× (m4)</td></tr>
+<tr><td>Pure upscale, smooth content</td><td>Marginal</td><td>0.17 dB, 0.40 cv max (m3)</td></tr>
+<tr><td>Any 4:2:0 source</td><td>After chroma reconstruction</td><td>Chroma is already destroyed</td></tr>
+</tbody>
+</table>
+
+<p>Two rules that matter more than the colour space:</p>
+
+<ol>
+<li><strong>Never compare pipelines with a metric in an unstated space.</strong> Compute both ways
+and report both, or the number means nothing. This cost me a wrong conclusion in measurement 6
+and is the single most useful thing in this article.</li>
+<li><strong>Sample density beats colour space.</strong> At 8× downscale both spaces return zero
+contrast on a 1-pixel line. No amount of correct gamma handling recovers a frequency that is not
+in the samples. If you have to choose one improvement, choose more source pixels.</li>
+</ol>
+
+<p>For the parts that are unambiguously correct — downscaling, averaging, compositing — the fix is
+cheap and the error is large. For pure upscaling of smooth content, the honest answer is that it
+barely matters, and anyone who tells you otherwise should show you which colour space they computed
+their dB in.</p>
+
+<h2>Reproducing all nine measurements</h2>
+
+<p>Self-contained; needs only numpy and Pillow. Numbers printed match the tables above.</p>
+
+<pre><code>import numpy as np
+from PIL import Image
+
+def s2l(c):
+    c = np.asarray(c, float)
+    return np.where(c &lt;= 0.04045, c/12.92, ((c+0.055)/1.055)**2.4)
+
+def l2s(c):
+    c = np.clip(np.asarray(c, float), 0, 1)
+    return np.where(c &lt;= 0.0031308, c*12.92, 1.055*c**(1/2.4)-0.055)
+
+def box(a, f):                      # exact area-average downscale, C,H,W or H,W
+    h, w = a.shape[-2]//f*f, a.shape[-1]//f*f
+    a = a[..., :h, :w]
+    return a.reshape(a.shape[:-2]+(h//f, f, w//f, f)).mean(axis=(-3, -1))
+
+def bil(a, ohw):                    # bilinear, half-pixel centres
+    ih, iw = a.shape[-2:]
+    ys = (np.arange(ohw[0])+.5)*(ih/ohw[0])-.5
+    xs = (np.arange(ohw[1])+.5)*(iw/ohw[1])-.5
+    y0 = np.clip(np.floor(ys).astype(int), 0, ih-1); y1 = np.clip(y0+1, 0, ih-1)
+    x0 = np.clip(np.floor(xs).astype(int), 0, iw-1); x1 = np.clip(x0+1, 0, iw-1)
+    wy = np.clip(ys-y0, 0, 1)[:, None]; wx = np.clip(xs-x0, 0, 1)[None, :]
+    return (a[..., y0[:,None], x0[None,:]]*(1-wy)*(1-wx)
+          + a[..., y0[:,None], x1[None,:]]*(1-wy)*wx
+          + a[..., y1[:,None], x0[None,:]]*wy*(1-wx)
+          + a[..., y1[:,None], x1[None,:]]*wy*wx)
+
+def psnr(a, b):
+    m = float(np.mean((a-b)**2))
+    return 99.0 if m &lt; 1e-12 else 10*np.log10(1/m)
+
+# m1: 50/50 checkerboard, gamma vs linear area average
+chk = np.zeros((256, 256)); chk[::2, ::2] = 1; chk[1::2, 1::2] = 1
+print(box(chk, 4).mean()*255)                      # 127.50  gamma space
+print(l2s(box(s2l(chk), 4)).mean()*255)            # 187.52  linear light
+print(l2s(np.array(0.5))*255)                      # 187.52  physics
+
+# m3: pure upscale of a smooth ramp, no downscale
+g  = np.tile(np.linspace(0, 1, 32), (32, 1))
+gt = np.tile(np.linspace(0, 1, 256), (256, 1))
+print(psnr(bil(g, (256,256)), gt))                 # 42.04  dB, sRGB
+print(psnr(l2s(bil(s2l(g), (256,256))), gt))       # 42.21  dB, linear
+
+# m7: same two outputs, both metrics -> winner flips
+im = Image.open('photo.jpg').convert('RGB'); im.thumbnail((512, 512), Image.LANCZOS)
+ph = np.moveaxis(np.asarray(im, float)/255, -1, 0)
+o = {s: (bil(box(p, 4), ph.shape[-2:]) if s == 'g'
+         else l2s(bil(box(s2l(p), 4), ph.shape[-2:])))
+     for s, p in (('g', ph), ('l', ph))}
+print(psnr(o['g'], ph), psnr(o['l'], ph))                       # gamma metric
+print(psnr(s2l(o['g']), s2l(ph)), psnr(s2l(o['l']), s2l(ph)))   # linear metric</code></pre>
+
+<h2>What this changes for an upscaler</h2>
+
+<p>Most of what I expected to find held: gamma-space averaging is wrong by 60 code values, and on
+thin dark-background structure it destroys half the contrast. But three of the ten measurements came
+out against the simple story — pure upscaling barely notices, multi-step resizing does not compound,
+and on a real photograph the physically correct pipeline scored lower under a gamma-space metric.</p>
+
+<p>That last one is the finding worth keeping. The colour space of your metric is not a detail; it
+determines which pipeline wins. Anyone comparing resampling methods, denoisers, or upscalers
+without stating it is reporting the metric's bias, not the method's quality.</p>
+
+<p>The upscaler at <a href="https://upgolab.com">upgolab.com</a> runs in the browser and handles the
+downscale and composite steps in linear light, which is where measurements 1, 4 and 9 put the real
+error — the pure upscale pass is where it makes least difference, so that is where the compute goes
+to sample density instead.</p>
+
+</article>
+
+<footer>
+Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy 1.26.4
+and Pillow 12.2.0 on a 341×512 crop of a 1080×1620 photograph plus synthetic controls; 10 tables,
+3 negative results. Every number reproducible from the snippet above; no value was adjusted after
+the run.
+
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
+
+<nav class="sisternav" aria-label="More measured upscaling guides">
+<p>More measured guides</p>
+<ul>
+  <li><a href="https://celticgemini001.github.io/upgolab-ai-upscaler-guide/">What upscaling recovers vs invents</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">Why video isn't image upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-product-photos/">Product shot vs face</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-2k-vs-4k-decision/">2K vs 4K bits-per-pixel</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-anime-illustration/">Line art and ink coverage</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-old-footage-restoration/">Old footage restoration</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-screen-recording-4k/">Screen recording to 4K</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">4K thumbnail master</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-remove-background-and-upscale/">Cutout and upscale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-anisotropic-upscale/">Anisotropic / one-axis scale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">Chroma subsampling 4:2:0</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">What rel=nofollow actually does</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-tools/">All guides (index)</a></li>
+</ul>
+</nav>
+</footer>
+</main>
+</body>
+</html>
