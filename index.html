@@ -41,6 +41,15 @@ pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1r
 code{font-size:.9em}
 footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
 </style>
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
 </head>
 <body>
 <main>
@@ -64,7 +73,7 @@ reaches your eye — it represents roughly 21%. The encoding exists because huma
 is roughly logarithmic, so spending code values where the eye is sensitive wastes fewer bits. That
 is a storage decision, and it is a good one.</p>
 
-<p>The problem is that almost every image operation — blur, resize, sharpen, average, composite —
+<p>The problem is that almost every image operation — <a href="https://celticgemini001.github.io/upgolab-motion-blur-before-upscale/">blur</a>, resize, sharpen, average, composite —
 is defined as a physical operation on light. Averaging two pixels means averaging the light they
 emitted. If you average the encoded values instead, you are averaging the logarithms, and the
 average of logarithms is not the logarithm of the average. The error is systematic and it always
@@ -78,7 +87,7 @@ goes. What follows is the part that is usually left out.</p>
 
 <p>A 256×256 field of 1-pixel checkerboard: half the pixels at 1.0, half at 0.0. Average it 4×
 in each direction by exact area averaging. Every 4×4 block contains exactly 8 white and 8 black
-pixels. The physical answer is 0.5 in linear light, which encodes to sRGB 0.7354 — that is
+pixels. The physical answer is 0.5 in <a href="https://celticgemini001.github.io/upgolab-bit-depth-banding/">linear light</a>, which encodes to sRGB 0.7354 — that is
 <strong>187.5/255</strong>, not 128.</p>
 
 <table>
@@ -189,7 +198,7 @@ of means, when the subsets are equal size, is the mean of the whole set. Gamma d
 — it is a pointwise map applied identically at every stage, so the composition is the same map
 applied once.</p>
 
-<p>The compounding claim is only true when the resampling is lossy in a way that interacts with
+<p>The compounding claim is only true when the <a href="https://celticgemini001.github.io/upgolab-fractional-upscale-factors/">resampling</a> is lossy in a way that interacts with
 clipping: if intermediate values saturate against 0 or 1, information is lost at each step and
 repetition makes it worse. With no clipping, gamma-space multi-step resizing is not worse than
 single-step. Another negative result.</p>
@@ -670,22 +679,11 @@ error — the pure upscale pass is where it makes least difference, so that is w
 to sample density instead.</p>
 
 </article>
-
 <footer>
 Published by UpgoLAB — AI photo and short-video upscaling in the browser. Measured with numpy 1.26.4
 and Pillow 12.2.0 on a 341×512 crop of a 1080×1620 photograph plus synthetic controls; 10 tables,
 3 negative results. Every number reproducible from the snippet above; no value was adjusted after
 the run.
-
-<style>
-.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
-.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
- color:#5b6270;margin:0 0 .6rem}
-.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
-.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
-.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
-.sisternav a:hover{border-bottom-color:#0a58ca}
-</style>
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
